@@ -72,15 +72,15 @@ public class EC2JavaServer {
                         withValues("*" + OpenstackSnapshotId + "*"));
         DescribeSnapshotsResult describeSnapshotsResult =
                 ec2.describeSnapshots(describeSnapshotsRequest);
-        if (describeSnapshotsRequest.getSnapshotIds().size() != 1) {
-            for (String snapshotId : describeSnapshotsRequest.getSnapshotIds()) {
-                System.out.print("snapshot:" + snapshotId);
+        if (describeSnapshotsResult.getSnapshots().size() >= 1) {
+            for (Snapshot snapshot : describeSnapshotsResult.getSnapshots()) {
+                System.out.print("snapshot:" + snapshot.getSnapshotId());
             }
             throw new Exception("snapshot is not unique or empty");
         }
 
         String EC2SnapshotId =
-                describeSnapshotsRequest.getSnapshotIds().get(0);
+        		describeSnapshotsResult.getSnapshots().get(0).getSnapshotId();
         CreateVolumeRequest request = new CreateVolumeRequest();
         request.setSnapshotId(EC2SnapshotId);
         request.setAvailabilityZone(getAvailZone().getZoneName());
