@@ -148,6 +148,7 @@ public class EC2JavaServer {
                         instance.getInstanceId());
         DescribeInstancesResult instancesResult =
                 ec2.describeInstances(describeInstancesRequest);
+
         // fill result
         HashMap<String, String> result = new HashMap<String, String>();
         result.put("public-ip", instancesResult.getReservations().get(0).
@@ -186,20 +187,19 @@ public class EC2JavaServer {
      * @return
      */
     public String getInstanceIdFromName(String name) throws Exception {
+        String result = "None";
         DescribeInstancesRequest describeInstancesRequest =
                 new DescribeInstancesRequest().withFilters(new Filter().
-                        withName("Name").
-                        withValues("*" + name + "*"));
-        DescribeInstancesResult result = ec2.describeInstances(
-                describeInstancesRequest);
-        if (result.getReservations().isEmpty()) {
-            throw new Exception("can't find ec2 instances");
-        }
+                        withName("tag:Name").withValues(name));
 
-        if (result.getReservations().get(0).getInstances().isEmpty()) {
-            throw new Exception("can't find ec2 instances");
+        DescribeInstancesResult describeInstancesResult = ec2.describeInstances(
+                describeInstancesRequest);
+        if (!describeInstancesResult.getReservations().isEmpty() &&
+                !describeInstancesResult.getReservations().get(0).getInstances().isEmpty()) {
+            result = describeInstancesResult.getReservations().get(0).
+                    getInstances().get(0).getInstanceId();
         }
-        return result.getReservations().get(0).getInstances().get(0).getInstanceId();
+        return result;
     }
 
     /**
@@ -209,17 +209,37 @@ public class EC2JavaServer {
      * @throws Exception
      */
     public String getVolumeIdFromName(String name) throws Exception {
+        String result = "None";
         DescribeVolumesRequest describeVolumesRequest =
                 new DescribeVolumesRequest().withFilters(new Filter().
-                        withName("Name").
-                        withValues("*" + name + "*"));
-        DescribeVolumesResult result = ec2.describeVolumes(
+                        withName("tag:Name").withValues(name));
+        DescribeVolumesResult describeVolumesResult = ec2.describeVolumes(
                 describeVolumesRequest);
-        if (result.getVolumes().isEmpty()) {
-            throw new Exception("can't find ec2 volumes");
+        if (!describeVolumesResult.getVolumes().isEmpty()) {
+            result = describeVolumesResult.getVolumes().get(0).getVolumeId();
         }
 
-        return result.getVolumes().get(0).getVolumeId();
+        return result;
+    }
+
+    /**
+     * get instance status from instanceId
+     * @param instanceId
+     * @return
+     */
+    public String getInstanceStatus(String instanceId) {
+        String result = "None";
+        DescribeInstancesRequest request = new DescribeInstancesRequest().
+                withInstanceIds(Collections.singletonList(instanceId));
+        DescribeInstancesResult describeInstancesResult
+                = ec2.describeInstances(request);
+        System.out.println("instances:" + result);
+        if (!describeInstancesResult.getReservations().isEmpty() &&
+                !describeInstancesResult.getReservations().get(0).getInstances().isEmpty()) {
+            result = describeInstancesResult.getReservations().get(0).
+                    getInstances().get(0).getState().getName();
+        }
+        return result;
     }
 
     public static void testDeleteAllInstances() {
@@ -236,12 +256,70 @@ public class EC2JavaServer {
         } catch (Exception e) {
             e.printStackTrace();
         }
+
     }
 
+    public static void testGetNetwork()  {
+        EC2JavaServer ec2JavaServer = new EC2JavaServer();
+        DescribeInstancesRequest request = new DescribeInstancesRequest();
+        DescribeInstancesResult result = ec2.describeInstances(request);
+        System.out.println("instances:" + result);
+
+        for (Reservation reservation : result.getReservations()) {
+            for(Instance instance : reservation.getInstances()) {
+                if (!instance.getNetworkInterfaces().isEmpty()) {
+                    String networkId = instance.getNetworkInterfaces().get(0).getNetworkInterfaceId();
+                    DescribeNetworkInterfacesRequest describeNetworkInterfacesRequest =
+                            new DescribeNetworkInterfacesRequest().
+                                    withNetworkInterfaceIds(Collections.singletonList(networkId));
+                    DescribeNetworkInterfacesResult result1 =
+                            ec2.describeNetworkInterfaces(describeNetworkInterfacesRequest);
+                    System.out.println("network:" + result1);
+                }
+            }
+        }
+    }
+
+    public static void testGetInstance(String name) {
+        EC2JavaServer ec2JavaServer = new EC2JavaServer();
+        try {
+            ec2JavaServer.launchInstanceFromAMI("ami-79e8c42b", name);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        DescribeInstancesRequest request = new DescribeInstancesRequest();
+        DescribeInstancesResult result = ec2.describeInstances(request);
+        System.out.println("instances:" + result);
+
+        try {
+           String id = ec2JavaServer.getInstanceIdFromName(name);
+            System.out.println("id:" + id);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void testGetInstanceStatus(String name) {
+        EC2JavaServer ec2JavaServer = new EC2JavaServer();
+        try {
+            ec2JavaServer.launchInstanceFromAMI("ami-79e8c42b", name);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+
+        try {
+            String id = ec2JavaServer.getInstanceIdFromName(name);
+            System.out.println("id:" + id);
+            String status = ec2JavaServer.getInstanceStatus(id);
+            System.out.println("status:" + status);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
     public static void main(String [] args) {
         // TODO: make the port configurable
-        //GatewayServer gatewayServer = new GatewayServer(new EC2JavaServer(), 25535);
-        //gatewayServer.start();
-        testDeleteAllInstances();
+        GatewayServer gatewayServer = new GatewayServer(new EC2JavaServer(), 25535);
+         gatewayServer.start();
     }
 }
