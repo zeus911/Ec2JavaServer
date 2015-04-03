@@ -59,18 +59,19 @@ public class EC2JavaServer {
 
     /**
      * Create EC2 volume from EC2 snapshot
-     * @param OpenstackSnapshotId note, this snapshotId is from openstack
+     * @param openstackSnapshotId note, this snapshotId is from openstack
      *                            side, which we need map it to EC2 snapshot
      *                            id
+     * @param name
      * @return volumeId in EC2
      * @throws Exception
      */
-    public String createVolumeFromSnapshot(String OpenstackSnapshotId)
+    public String createVolumeFromSnapshot(String openstackSnapshotId, String name)
             throws Exception {
         DescribeSnapshotsRequest describeSnapshotsRequest =
                 new DescribeSnapshotsRequest().withFilters(new Filter().
                         withName("description").
-                        withValues("*" + OpenstackSnapshotId + "*"));
+                        withValues("*" + openstackSnapshotId + "*"));
         DescribeSnapshotsResult describeSnapshotsResult =
                 ec2.describeSnapshots(describeSnapshotsRequest);
         if (describeSnapshotsResult.getSnapshots().size() >= 1) {
@@ -86,6 +87,11 @@ public class EC2JavaServer {
         request.setSnapshotId(EC2SnapshotId);
         request.setAvailabilityZone(getAvailZone().getZoneName());
         CreateVolumeResult result = ec2.createVolume(request);
+
+        // tag it with name
+        ec2.createTags(new CreateTagsRequest().withResources(
+                result.getVolume().getVolumeId()).withTags(
+                new Tag("Name", name)));
         return result.getVolume().getVolumeId();
     }
 
@@ -175,15 +181,47 @@ public class EC2JavaServer {
     }
 
     /**
-     * get EC2 instance Id from name
+     * get EC2 instance Id from name tag
      * @param name
      * @return
      */
-    public String getInstanceIdFromName(String name) {
+    public String getInstanceIdFromName(String name) throws Exception {
         DescribeInstancesRequest describeInstancesRequest =
-                new DescribeInstancesRequest().withFilters();
+                new DescribeInstancesRequest().withFilters(new Filter().
+                        withName("Name").
+                        withValues("*" + name + "*"));
+        DescribeInstancesResult result = ec2.describeInstances(
+                describeInstancesRequest);
+        if (result.getReservations().isEmpty()) {
+            throw new Exception("can't find ec2 instances");
+        }
+
+        if (result.getReservations().get(0).getInstances().isEmpty()) {
+            throw new Exception("can't find ec2 instances");
+        }
+        return result.getReservations().get(0).getInstances().get(0).getInstanceId();
     }
-    
+
+    /**
+     * Get volume ec2 Id from name tag
+     * @param name
+     * @return
+     * @throws Exception
+     */
+    public String getVolumeIdFromName(String name) throws Exception {
+        DescribeVolumesRequest describeVolumesRequest =
+                new DescribeVolumesRequest().withFilters(new Filter().
+                        withName("Name").
+                        withValues("*" + name + "*"));
+        DescribeVolumesResult result = ec2.describeVolumes(
+                describeVolumesRequest);
+        if (result.getVolumes().isEmpty()) {
+            throw new Exception("can't find ec2 volumes");
+        }
+
+        return result.getVolumes().get(0).getVolumeId();
+    }
+
     public static void testDeleteAllInstances() {
         EC2JavaServer ec2JavaServer = new EC2JavaServer();
         try {
