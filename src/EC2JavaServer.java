@@ -10,6 +10,7 @@ import org.apache.commons.logging.impl.Log4JLogger;
 import py4j.GatewayServer;
 
 import java.sql.Time;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import org.apache.commons.logging.Log;
@@ -149,6 +150,15 @@ public class EC2JavaServer {
         return result;
     }
 
+    public void deleteInstance(String instanceId) throws Exception {
+        TerminateInstancesRequest request = new TerminateInstancesRequest().withInstanceIds(
+                Collections.singletonList(instanceId));
+        TerminateInstancesResult result = ec2.terminateInstances(request);
+        if (result.getTerminatingInstances().isEmpty()) {
+            throw new Exception("failed to delete Instance");
+        }
+    }
+
     /**
      * attach volume to instance, with specified device name
      * @param EC2volumeId
@@ -164,18 +174,36 @@ public class EC2JavaServer {
         return result.getAttachment().getDevice();
     }
 
-    public static void main(String [] args) {
-        // TODO: make the port configurable
-        GatewayServer gatewayServer = new GatewayServer(new EC2JavaServer(), 25535);
-        gatewayServer.start();
-        /*EC2JavaServer ec2JavaServer = new EC2JavaServer();
+    /**
+     * get EC2 instance Id from name
+     * @param name
+     * @return
+     */
+    public String getInstanceIdFromName(String name) {
+        DescribeInstancesRequest describeInstancesRequest =
+                new DescribeInstancesRequest().withFilters();
+    }
+    
+    public static void testDeleteAllInstances() {
+        EC2JavaServer ec2JavaServer = new EC2JavaServer();
         try {
-            HashMap<String, String> result =
-                    ec2JavaServer.launchInstanceFromAMI("ami-79e8c42b", "test3");
-            System.out.println("publicIp:" + result.get("public-ip"));
-            System.out.println("instance:" + result.get("instance-id"));
+            DescribeInstancesRequest request = new DescribeInstancesRequest();
+            DescribeInstancesResult result = ec2.describeInstances(request);
+            for (Reservation reservation : result.getReservations()) {
+                for(Instance instance : reservation.getInstances()) {
+                    ec2JavaServer.deleteInstance(instance.getInstanceId());
+                }
+            }
+            System.out.println("result:" + result);
         } catch (Exception e) {
             e.printStackTrace();
-        }*/
+        }
+    }
+
+    public static void main(String [] args) {
+        // TODO: make the port configurable
+        //GatewayServer gatewayServer = new GatewayServer(new EC2JavaServer(), 25535);
+        //gatewayServer.start();
+        testDeleteAllInstances();
     }
 }
