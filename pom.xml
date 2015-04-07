@@ -121,5 +121,5 @@
     </profiles>
 
     <groupId>org.aegis.app</groupId>
-    <artifactId>aws-sample</artifactId>
+    <artifactId>Ec2JavaServer</artifactId>
 </project>

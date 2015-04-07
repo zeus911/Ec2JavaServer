@@ -157,6 +157,11 @@ public class EC2JavaServer {
         return result;
     }
 
+    /**
+     * Delete EC2 instance by EC2 instanceId
+     * @param instanceId
+     * @throws Exception
+     */
     public void deleteInstance(String instanceId) throws Exception {
         TerminateInstancesRequest request = new TerminateInstancesRequest().withInstanceIds(
                 Collections.singletonList(instanceId));
@@ -179,6 +184,26 @@ public class EC2JavaServer {
                 new AttachVolumeRequest().withVolumeId(EC2volumeId).
                         withInstanceId(EC2InstanceId).withDevice(mountPoint));
         return result.getAttachment().getDevice();
+    }
+
+    /**
+     * Create volume from blank with specified name and size
+     * @param name name as tag which will be used to anchor the volume
+     * @param size
+     * @return
+     * @throws Exception
+     */
+    public String createVolume(String name, int size) throws Exception {
+        CreateVolumeRequest request = new CreateVolumeRequest().
+                withAvailabilityZone(getAvailZone().getZoneName()).
+                withSize(size);
+        CreateVolumeResult result = ec2.createVolume(request);
+
+        // tag it with name
+        ec2.createTags(new CreateTagsRequest().withResources(
+                result.getVolume().getVolumeId()).withTags(
+                new Tag("Name", name)));
+        return result.getVolume().getVolumeId();
     }
 
     /**
@@ -317,9 +342,10 @@ public class EC2JavaServer {
             e.printStackTrace();
         }
     }
+
     public static void main(String [] args) {
         // TODO: make the port configurable
         GatewayServer gatewayServer = new GatewayServer(new EC2JavaServer(), 25535);
-         gatewayServer.start();
+        gatewayServer.start();
     }
 }
