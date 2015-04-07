@@ -193,10 +193,10 @@ public class EC2JavaServer {
      * @return
      * @throws Exception
      */
-    public String createVolume(String name, int size) throws Exception {
+    public String createVolume(String name, Long size) throws Exception {
         CreateVolumeRequest request = new CreateVolumeRequest().
                 withAvailabilityZone(getAvailZone().getZoneName()).
-                withSize(size);
+                withSize(size.intValue());
         CreateVolumeResult result = ec2.createVolume(request);
 
         // tag it with name
