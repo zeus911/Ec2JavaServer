@@ -1,3 +1,4 @@
+import com.amazonaws.AmazonClientException;
 import com.amazonaws.auth.AWSCredentials;
 import com.amazonaws.auth.BasicAWSCredentials;
 import com.amazonaws.auth.profile.ProfileCredentialsProvider;
@@ -22,22 +23,25 @@ public class EC2JavaServer {
     private static AmazonEC2 ec2 = null;
     private static AvailabilityZone availabilityZone = null;
 
-    static {
-        System.setProperty("aws.access",
-                "AKIAJTG3W4YWID4RGFNQ");
-        System.setProperty("aws.secret",
-                "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");
-    }
-
     public EC2JavaServer() {
         if (ec2 != null) {
             return;
         }
-
-        // AWSCredentials credentials = new ProfileCredentialsProvider().getCredentials();
-        AWSCredentials credentials = new BasicAWSCredentials(
-                System.getProperty("aws.access"),
-                System.getProperty("aws.secret"));
+          /*
+         * The ProfileCredentialsProvider will return your [default]
+         * credential profile by reading from the credentials file located at
+         * (~/.aws/credentials).
+         */
+        AWSCredentials credentials = null;
+        try {
+            credentials = new ProfileCredentialsProvider().getCredentials();
+        } catch (Exception e) {
+            throw new AmazonClientException(
+                    "Cannot load the credentials from the credential profiles file. " +
+                            "Please make sure that your credentials file is at the correct " +
+                            "location (~/.aws/credentials), and is in valid format.",
+                    e);
+        }
         ec2 = new AmazonEC2Client(credentials);
         ec2.setRegion(Region.getRegion(Regions.AP_SOUTHEAST_1));
     }
@@ -66,7 +70,8 @@ public class EC2JavaServer {
      * @return volumeId in EC2
      * @throws Exception
      */
-    public String createVolumeFromSnapshot(String openstackSnapshotId, String name)
+    public String createVolumeFromSnapshot(String openstackSnapshotId,
+                                           String name)
             throws Exception {
         DescribeSnapshotsRequest describeSnapshotsRequest =
                 new DescribeSnapshotsRequest().withFilters(new Filter().
