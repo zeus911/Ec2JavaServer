@@ -177,6 +177,16 @@ public class EC2JavaServer {
     }
 
     /**
+     * Delete EBS volume by EC2 volumeId
+     * @param volumeId
+     * @throws Exception
+     */
+    public void deleteVolume(String volumeId) throws Exception {
+        DeleteVolumeRequest request = new DeleteVolumeRequest().withVolumeId(volumeId);
+        ec2.deleteVolume(request);
+    }
+
+    /**
      * attach volume to instance, with specified device name
      * @param EC2volumeId
      * @param EC2InstanceId
