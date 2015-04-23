@@ -263,6 +263,26 @@ public class EC2JavaServer {
     }
 
     /**
+     * Get image ec2 Id from name tag
+     * @param name
+     * @return
+     * @throws Exception
+     */
+    public String getImageIdFromName(String name) throws Exception {
+        String result = "None";
+        DescribeImagesRequest describeImagesRequest =
+                new DescribeImagesRequest().withFilters(new Filter().
+                        withName("tag:Name").withValues(name));
+        DescribeImagesResult describeImagesResult = ec2.describeImages(
+                describeImagesRequest);
+        if (!describeImagesResult.getImages().isEmpty()) {
+            result = describeImagesResult.getImages().get(0).getImageId();
+        }
+
+        return result;
+    }
+    
+    /**
      * get instance status from instanceId
      * @param instanceId
      * @return
