@@ -13,8 +13,11 @@ import py4j.GatewayServer;
 import java.sql.Time;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
 import org.apache.commons.logging.Log;
+import sun.misc.BASE64Encoder;
+
 /**
  * Class as EC2 java server, which will serve py4j client call
  * and call EC2 java client to act on AWS EC2 service.
@@ -79,10 +82,11 @@ public class EC2JavaServer {
                         withValues("*" + openstackSnapshotId + "*"));
         DescribeSnapshotsResult describeSnapshotsResult =
                 ec2.describeSnapshots(describeSnapshotsRequest);
-        if (describeSnapshotsResult.getSnapshots().size() >= 1) {
-            for (Snapshot snapshot : describeSnapshotsResult.getSnapshots()) {
-                System.out.print("snapshot:" + snapshot.getSnapshotId());
-            }
+        for (Snapshot snapshot : describeSnapshotsResult.getSnapshots()) {
+            System.out.print("snapshot:" + snapshot.getSnapshotId());
+        }
+        if (describeSnapshotsResult.getSnapshots().size() > 1 ||
+                describeSnapshotsResult.getSnapshots().isEmpty()) {
             throw new Exception("snapshot is not unique or empty");
         }
 
@@ -106,10 +110,13 @@ public class EC2JavaServer {
      * created with default user
      * @param EC2ImageId AMI image id
      * @param name instance name as tag
+     * @param dataSubNetId data subnet id
+     * @param apiSubNetId api subnet id
      * @return {"public-ip":, "instance-id":}
      */
     public HashMap<String, String> launchInstanceFromAMI(
-            String EC2ImageId, String name) throws Exception {
+            String EC2ImageId, String name, String dataSubNetId, String apiSubNetId, String userData)
+            throws Exception {
         // run instance according to image
         Image img = ec2.describeImages(new DescribeImagesRequest().
                 withImageIds(EC2ImageId)).getImages().get(0);
@@ -118,8 +125,17 @@ public class EC2JavaServer {
         RunInstancesRequest req = new RunInstancesRequest(EC2ImageId, 1, 1).
                 withInstanceType(type).withPlacement(
                 new Placement().withAvailabilityZone(getAvailZone().getZoneName()));
-        List<Instance> insts = ec2.runInstances(req).getReservation().getInstances();
+        if (dataSubNetId != null) {
+            req.withSubnetId(dataSubNetId);
+        }
 
+        if (userData != null) {
+            BASE64Encoder base64Encoder = new BASE64Encoder();
+            String encoded = base64Encoder.encode(userData.getBytes());
+            req.withUserData(encoded);
+        }
+
+        List<Instance> insts = ec2.runInstances(req).getReservation().getInstances();
         // tag it with name
         Instance instance = insts.get(0);
         ec2.createTags(new CreateTagsRequest().withResources(
@@ -154,6 +170,11 @@ public class EC2JavaServer {
         DescribeInstancesResult instancesResult =
                 ec2.describeInstances(describeInstancesRequest);
 
+        // attach api subnet
+        if (apiSubNetId != null) {
+            attachSubNetToInstance(apiSubNetId, instance.getInstanceId(), 1, "api-network");
+        }
+
         // fill result
         HashMap<String, String> result = new HashMap<String, String>();
         result.put("public-ip", instancesResult.getReservations().get(0).
@@ -162,18 +183,60 @@ public class EC2JavaServer {
         return result;
     }
 
+    public void attachSubNetToInstance(String subNetId, String instanceId, int deviceIndex, String desp) {
+        // attach api subnet id
+        CreateNetworkInterfaceRequest createNetworkInterfaceRequest =
+                new CreateNetworkInterfaceRequest().withSubnetId(subNetId).withDescription(desp);
+        CreateNetworkInterfaceResult createNetworkInterfaceResult =
+                ec2.createNetworkInterface(createNetworkInterfaceRequest);
+        AttachNetworkInterfaceRequest attachNetworkInterfaceRequest = new AttachNetworkInterfaceRequest().
+                withNetworkInterfaceId(createNetworkInterfaceResult.getNetworkInterface().getNetworkInterfaceId()).
+                withDeviceIndex(deviceIndex).withInstanceId(instanceId);
+        ec2.attachNetworkInterface(attachNetworkInterfaceRequest);
+    }
+
     /**
      * Delete EC2 instance by EC2 instanceId
      * @param instanceId
      * @throws Exception
      */
     public void deleteInstance(String instanceId) throws Exception {
-        TerminateInstancesRequest request = new TerminateInstancesRequest().withInstanceIds(
+        DescribeInstancesRequest request = new DescribeInstancesRequest().
+                withInstanceIds(Collections.singletonList(instanceId));;
+        DescribeInstancesResult result = ec2.describeInstances(request);
+        System.out.println("instances:" + result);
+
+
+        TerminateInstancesRequest terminateInstancesRequest =
+                new TerminateInstancesRequest().withInstanceIds(
                 Collections.singletonList(instanceId));
-        TerminateInstancesResult result = ec2.terminateInstances(request);
-        if (result.getTerminatingInstances().isEmpty()) {
+        TerminateInstancesResult terminateInstancesResult =
+                ec2.terminateInstances(terminateInstancesRequest);
+        if (terminateInstancesResult.getTerminatingInstances().isEmpty()) {
             throw new Exception("failed to delete Instance");
         }
+
+        // wait 10 seconds
+        Thread.sleep(20*1000);
+
+        for (Reservation reservation : result.getReservations()) {
+            for(Instance instance : reservation.getInstances()) {
+                for (InstanceNetworkInterface networkInterface : instance.getNetworkInterfaces()) {
+                    String networkId = networkInterface.getNetworkInterfaceId();
+                    DeleteNetworkInterfaceRequest deleteNetworkInterfaceRequest =
+                            new DeleteNetworkInterfaceRequest().withNetworkInterfaceId(networkId);
+                    ec2.deleteNetworkInterface(deleteNetworkInterfaceRequest);
+                    System.out.print("deleted interface:" + networkId);
+                }
+            }
+        }
+    }
+
+    public void rebootInstance(String instanceId) {
+        RebootInstancesRequest rebootInstancesRequest =
+                new RebootInstancesRequest().withInstanceIds(
+                        Collections.singletonList(instanceId));
+        ec2.rebootInstances(rebootInstancesRequest);
     }
 
     /**
@@ -195,9 +258,26 @@ public class EC2JavaServer {
      */
     public String attachVolumeToInstance(
             String EC2volumeId, String EC2InstanceId, String mountPoint) {
+
         AttachVolumeResult result = ec2.attachVolume(
                 new AttachVolumeRequest().withVolumeId(EC2volumeId).
                         withInstanceId(EC2InstanceId).withDevice(mountPoint));
+        return result.getAttachment().getDevice();
+    }
+
+    /**
+     * detach volume from instance, with specified device name,
+     * by default force to detach
+     * @param EC2volumeId
+     * @param EC2InstanceId
+     * @return
+     */
+
+    public String detachVolumeFromInstance(
+            String EC2volumeId, String EC2InstanceId, String mountPoint) {
+        DetachVolumeResult result = ec2.detachVolume(
+                new DetachVolumeRequest().withVolumeId(EC2volumeId).
+                        withInstanceId(EC2InstanceId).withForce(true));
         return result.getAttachment().getDevice();
     }
 
@@ -281,7 +361,7 @@ public class EC2JavaServer {
 
         return result;
     }
-    
+
     /**
      * get instance status from instanceId
      * @param instanceId
@@ -300,6 +380,32 @@ public class EC2JavaServer {
                     getInstances().get(0).getState().getName();
         }
         return result;
+    }
+
+    public HashMap<String, String> get_instance_macs(String instanceId) {
+        HashMap<String, String> macs = new HashMap<String, String>();
+        DescribeInstancesRequest request = new DescribeInstancesRequest().
+                withInstanceIds(Collections.singletonList(instanceId));;
+        DescribeInstancesResult result = ec2.describeInstances(request);
+        System.out.println("instances:" + result);
+
+        for (Reservation reservation : result.getReservations()) {
+            for(Instance instance : reservation.getInstances()) {
+                for (InstanceNetworkInterface networkInterface : instance.getNetworkInterfaces()) {
+                    String networkId = networkInterface.getNetworkInterfaceId();
+                    DescribeNetworkInterfacesRequest describeNetworkInterfacesRequest =
+                            new DescribeNetworkInterfacesRequest().
+                                    withNetworkInterfaceIds(Collections.singletonList(networkId));
+                    DescribeNetworkInterfacesResult result1 =
+                            ec2.describeNetworkInterfaces(describeNetworkInterfacesRequest);
+                    if (!result1.getNetworkInterfaces().isEmpty()) {
+                        macs.put(result1.getNetworkInterfaces().get(0).getSubnetId(),
+                                result1.getNetworkInterfaces().get(0).getMacAddress());
+                    }
+                }
+            }
+        }
+        return macs;
     }
 
     public static void testDeleteAllInstances() {
@@ -340,10 +446,30 @@ public class EC2JavaServer {
         }
     }
 
+    public static void testLaunchInstance() {
+        EC2JavaServer ec2JavaServer = new EC2JavaServer();
+        try {
+            HashMap<String, String> result = ec2JavaServer.launchInstanceFromAMI(
+                    "ami-0a1d2558", "d06e5c1a-169f-4c88-af96-4f4c139b37de",
+                    "subnet-2a6ebb5d", "subnet-246ebb53", null);
+            HashMap<String, String> macs = ec2JavaServer.get_instance_macs(result.get("instance-id"));
+            for (String subnet : macs.keySet()) {
+                System.out.println(subnet + macs.get(subnet));
+            }
+
+            DescribeInstanceAttributeRequest request =
+                    new DescribeInstanceAttributeRequest().withInstanceId(result.get("instance-id")).withAttribute("userData");
+            DescribeInstanceAttributeResult attribute = ec2.describeInstanceAttribute(request);
+            System.out.print(attribute.getInstanceAttribute());
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     public static void testGetInstance(String name) {
         EC2JavaServer ec2JavaServer = new EC2JavaServer();
         try {
-            ec2JavaServer.launchInstanceFromAMI("ami-79e8c42b", name);
+            ec2JavaServer.launchInstanceFromAMI("ami-79e8c42b", name, null, null, null);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -363,7 +489,7 @@ public class EC2JavaServer {
     public static void testGetInstanceStatus(String name) {
         EC2JavaServer ec2JavaServer = new EC2JavaServer();
         try {
-            ec2JavaServer.launchInstanceFromAMI("ami-79e8c42b", name);
+            ec2JavaServer.launchInstanceFromAMI("ami-79e8c42b", name, null, null, null);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -373,6 +499,33 @@ public class EC2JavaServer {
             System.out.println("id:" + id);
             String status = ec2JavaServer.getInstanceStatus(id);
             System.out.println("status:" + status);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void testCreateVolumeFromSp(String snapshotId, String name) {
+        EC2JavaServer ec2JavaServer = new EC2JavaServer();
+        try {
+            ec2JavaServer.createVolumeFromSnapshot(snapshotId, name);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void testDeleteInstance(String instanceId) {
+        EC2JavaServer ec2JavaServer = new EC2JavaServer();
+        try {
+            ec2JavaServer.deleteInstance(instanceId);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    public static void testRebootInstance(String instanceId) {
+        EC2JavaServer ec2JavaServer = new EC2JavaServer();
+        try {
+            ec2JavaServer.rebootInstance(instanceId);
         } catch (Exception e) {
             e.printStackTrace();
         }
